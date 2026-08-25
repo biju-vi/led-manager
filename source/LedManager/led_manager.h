@@ -93,6 +93,8 @@ eIPv6Only,
 eDualStackUp,
 eMaptUp,
 #endif
+eWanBackupActive,
+eWanPrimaryActive,
 eFwUpdateStart,
 eFwUpdateStop,
 eFwUpdateComplete,

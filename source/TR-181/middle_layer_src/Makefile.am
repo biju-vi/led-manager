@@ -30,7 +30,12 @@ libCcspLedManager_middle_layer_src_la_CPPFLAGS = -I$(top_srcdir)/source/TR-181/m
                                                 -I$(top_srcdir)/source/LedManager 
 
 libCcspLedManager_middle_layer_src_la_SOURCES = ledmgr_dml_apis.c ledmgr_plugin_main_apis.c cJSON.c secure_wrapper.c
-libCcspLedManager_middle_layer_src_la_LDFLAGS = -lccsp_common -lsyscfg -lsysevent -lpthread -ljson_schema_validator_wrapper -lsecure_wrapper -lm
+libCcspLedManager_middle_layer_src_la_LDFLAGS = -lccsp_common -lsyscfg -lsysevent -lpthread -lsecure_wrapper -lm
+
+if FEATURE_LEDMGR_WEBCONFIG
+libCcspLedManager_middle_layer_src_la_CPPFLAGS += -I$(top_srcdir)/source/TR-181/middle_layer_src/json_schema_validator_wrapper
+libCcspLedManager_middle_layer_src_la_LDFLAGS +=  -ljson_schema_validator_wrapper
+endif
 
 libCcspLedManager_middle_layer_src_la_CPPFLAGS += -I${PKG_CONFIG_SYSROOT_DIR}$(includedir)/rbus
 libCcspLedManager_middle_layer_src_la_SOURCES += ledmgr_rbus_handler_apis.c

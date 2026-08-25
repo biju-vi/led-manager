@@ -18,8 +18,6 @@
 ##########################################################################
 SUBDIRS =
 
-if FEATURE_LEDMGR_WEBCONFIG
 SUBDIRS += TR-181
-endif
 
 SUBDIRS += LedManager

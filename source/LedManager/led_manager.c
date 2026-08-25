@@ -40,10 +40,10 @@
 #include "cap.h"
 #ifdef LEDMGR_WEBCONFIG
 #include "ledmgr_webconfig.h"
-#include "ledmgr_rbus_handler_apis.h"
 #else
 #include "led_manager_global.h"
 #endif
+#include "ledmgr_rbus_handler_apis.h"
 
 #define DEBUG_INI_NAME "/etc/debug.ini"
 extern char * pComponentName;
@@ -56,10 +56,8 @@ extern char g_Subsystem[32];
 extern PCOMPONENT_COMMON_LED_MANAGER g_pComponentCommonLedMgr;
 cap_user appcaps;
 
-#ifdef LEDMGR_WEBCONFIG
 char conf_filepath[BUFLEN_128];
 ANSC_STATUS retStatus = ANSC_STATUS_FAILURE;
-#endif
 
 static void ledmgr_start ()
 {
@@ -254,14 +252,12 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-#ifdef LEDMGR_WEBCONFIG
     retStatus = LedMgr_Rbus_Init();
     if(retStatus != ANSC_STATUS_SUCCESS)
     {
         CcspTraceError(("%s %d - Rbus Init failed !\n", __FUNCTION__, __LINE__ ));
         return retStatus;
     }
-#endif
 
     ledmgr_start();
 

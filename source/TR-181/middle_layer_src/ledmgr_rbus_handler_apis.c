@@ -35,7 +35,9 @@
 #include "led_manager.h"
 #include "led_manager_events.h"
 #include "ledmgr_rbus_handler_apis.h"
+#ifdef LEDMGR_WEBCONFIG
 #include "json_schema_validator_wrapper.h"
+#endif
 #include "led_manager_utils.h"
 #include <stdio.h>
 #include <string.h>
@@ -52,8 +54,13 @@ static rbusHandle_t rbusHandle;
 char componentName[32] = "LEDMANAGER";
 unsigned int gSubscribersCount = 0;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
+static unsigned int wan_backup_status;
+extern int handle_event(cpe_event_t event);
+static InterfaceStatusType GetActiveInterfaceType(const char *interface_active_status);
+static void WanInterfaceStatusHandler(rbusHandle_t handle, rbusEvent_t const* event, rbusEventSubscription_t* subscription);
 rbusError_t LedMgr_Rbus_GetHandler(rbusHandle_t handle, rbusProperty_t property, rbusGetHandlerOptions_t* opts);
+
+#ifdef LEDMGR_WEBCONFIG
 rbusError_t LedMgr_Rbus_FullJson_SetHandler(rbusHandle_t handle, rbusProperty_t prop, rbusSetHandlerOptions_t* opts);
 rbusError_t LedMgr_Rbus_Brightness_SetHandler(rbusHandle_t handle, rbusProperty_t prop, rbusSetHandlerOptions_t* opts);
 rbusError_t LedMgr_Rbus_OnOff_SetHandler(rbusHandle_t handle, rbusProperty_t prop, rbusSetHandlerOptions_t* opts);
@@ -66,6 +73,7 @@ rbusDataElement_t ledMgrRbusDataElements[NUM_OF_RBUS_PARAMS] = {
     {LEDMGR_WEBCONFIG_BRIGHTNESS_DATA,  RBUS_ELEMENT_TYPE_EVENT | RBUS_ELEMENT_TYPE_PROPERTY, {LedMgr_Rbus_GetHandler, LedMgr_Rbus_Brightness_SetHandler, NULL, NULL, NULL, NULL}},
     {LEDMGR_WEBCONFIG_ONOFF_DATA,  RBUS_ELEMENT_TYPE_EVENT | RBUS_ELEMENT_TYPE_PROPERTY, {LedMgr_Rbus_GetHandler, LedMgr_Rbus_OnOff_SetHandler, NULL, NULL, NULL, NULL}},
 };
+#endif
 rbusError_t LedMgr_Rbus_GetHandler(rbusHandle_t handle, rbusProperty_t property, rbusGetHandlerOptions_t* opts)
 {
     char const* name = rbusProperty_GetName(property);
@@ -85,6 +93,7 @@ rbusError_t LedMgr_Rbus_GetHandler(rbusHandle_t handle, rbusProperty_t property,
     return ret;
 }
 
+#ifdef LEDMGR_WEBCONFIG
 rbusError_t LedMgr_Rbus_OnOff_SetHandler(rbusHandle_t handle, rbusProperty_t prop, rbusSetHandlerOptions_t* opts)
 {
     char const* name = rbusProperty_GetName(prop);
@@ -121,6 +130,7 @@ rbusError_t LedMgr_Rbus_OnOff_SetHandler(rbusHandle_t handle, rbusProperty_t pro
     CcspTraceInfo(("%s %d - LedMgr_Rbus_OnOff_SetHandler() success\n", __FUNCTION__, __LINE__, ret));
     return ret;
 }
+
 
 rbusError_t LedMgr_Rbus_Brightness_SetHandler(rbusHandle_t handle, rbusProperty_t prop, rbusSetHandlerOptions_t* opts)
 {
@@ -652,6 +662,7 @@ int LedMgr_parseBrightnessJson(char* buffer_brightness) {
     CcspTraceInfo(("%s %d - LedMgr_parseBrightnessJson() success\n", __FUNCTION__, __LINE__));
     return 0;
 }
+#endif
 static void LedMgr_Rbus_EventReceiveHandler(rbusHandle_t handle, rbusEvent_t const* event, rbusEventSubscription_t* subscription)
 {
     (void)handle;
@@ -676,6 +687,136 @@ static void LedMgr_Rbus_EventReceiveHandler(rbusHandle_t handle, rbusEvent_t con
         CcspTraceError(("%s:%d Unexpected Event Received [%s:%s]\n",__FUNCTION__, __LINE__,eventName));
     }
 }
+
+static InterfaceStatusType GetActiveInterfaceType(const char *interface_active_status)
+{
+    unsigned int len = 0;
+    unsigned int status = 0;
+    char *ptr = NULL;
+    char *token = NULL;
+    char ifType[64] = {0};
+
+    if (interface_active_status == NULL)
+    {
+        return IF_NONE_ACTIVE;
+    }
+
+    char *active_status = strdup(interface_active_status);
+
+    if (active_status == NULL)
+    {
+        return IF_NONE_ACTIVE;
+    }
+
+    token = strtok_r(active_status, "|", &ptr);
+
+    while (token)
+    {
+        char *comma = strchr(token, ',');
+        if (comma)
+        {
+            len = comma - token;
+            if (len >= sizeof(ifType))
+            {
+                len = sizeof(ifType) - 1;
+            }
+            memset(ifType,0,sizeof(ifType));
+            strncpy(ifType, token, len);
+            ifType[len] = '\0';
+            if(strlen(ifType) == 0)
+            {
+                CcspTraceError(("%s:%d Cannot determine interface type\n",__FUNCTION__, __LINE__));
+                free(active_status);
+                return IF_NONE_ACTIVE;
+            }
+            status = atoi(comma + 1);
+            if (status == 1)
+            {
+                free(active_status);
+                if ((strcmp(ifType, "HOTSPOT") == 0) || (strcmp(ifType, "REMOTE_LTE") == 0))
+                {
+                    CcspTraceInfo(("%s:%d Backup wan interface type %s is active\n",__FUNCTION__, __LINE__,ifType));
+                    return IF_BACKUP_ACTIVE;
+                }
+                CcspTraceInfo(("%s:%d Primary wan interface type %s is active \n",__FUNCTION__, __LINE__,ifType));
+                return IF_PRIMARY_ACTIVE;
+            }
+        }
+        token = strtok_r(NULL, "|", &ptr);
+    }
+    free(active_status);
+    return IF_NONE_ACTIVE;
+}
+
+static void WanInterfaceStatusHandler(rbusHandle_t handle, rbusEvent_t const* event, rbusEventSubscription_t* subscription)
+{
+    (void)handle;
+    (void)subscription;
+    rbusValue_t value = NULL;
+    const char* status = NULL;
+    const char* eventName = NULL;
+
+    if(!event || !event->data)
+    {
+        CcspTraceInfo(("%s:%d event is NULL\n",__FUNCTION__, __LINE__));
+        return;
+    }
+
+    eventName = event->name;
+
+    if(!eventName)
+    {
+        CcspTraceInfo(("%s:%d eventName is NULL\n",__FUNCTION__, __LINE__));
+        return;
+    }
+
+    CcspTraceInfo(("%s:%d Received notification for %s\n",__FUNCTION__, __LINE__, eventName));
+
+    value = rbusObject_GetValue(event->data, NULL);
+
+    if(!value)
+    {
+        CcspTraceError(("%s:%d Subscribed event does not have a value\n",__FUNCTION__, __LINE__));
+        return;
+    }
+
+    status = rbusValue_GetString(value, NULL);
+
+    if(!status)
+    {
+        CcspTraceError(("%s:%d Subscribed event does not have a status value\n",__FUNCTION__, __LINE__));
+        return;
+    }
+
+    CcspTraceInfo(("%s:%d Notification for %s : %s\n",__FUNCTION__, __LINE__, eventName, status));
+
+
+    InterfaceStatusType active_type = GetActiveInterfaceType(status);
+
+    /* HOTSPOT,0|DOCSIS,0|WANOE,1|DSL,0|REMOTE_LTE,0 */
+    if(active_type == IF_PRIMARY_ACTIVE)
+    { 
+        if(wan_backup_status == 0)
+        {
+            CcspTraceInfo(("%s:%d Ignoring Notification for %s\n",__FUNCTION__, __LINE__, eventName));
+            return;
+        }
+        // send primary interface event only if there was a backup interface active previously
+        wan_backup_status = 0;
+        CcspTraceInfo(("%s:%d Sending primary wan active LED event\n",__FUNCTION__, __LINE__));
+        handle_event(eWanPrimaryActive);
+    }
+    /* HOTSPOT,0|DOCSIS,0|WANOE,0|DSL,0|REMOTE_LTE,1 */
+    else if(active_type == IF_BACKUP_ACTIVE)
+    {
+        wan_backup_status = 1;
+        CcspTraceInfo(("%s:%d Sending backup wan active LED event\n",__FUNCTION__, __LINE__));
+        handle_event(eWanBackupActive);
+    }
+
+    return;
+}
+
 void LedMgr_Rbus_SubscribeDML(void)
 {
     rbusError_t ret = RBUS_ERROR_SUCCESS;
@@ -699,10 +840,17 @@ void LedMgr_Rbus_SubscribeDML(void)
 void LedMgr_Rbus_UnSubscribeDML(void)
 {
     rbusError_t ret = RBUS_ERROR_SUCCESS;
+#ifdef LEDMGR_WEBCONFIG
     ret = rbusEvent_Unsubscribe(rbusHandle, LEDMGR_WEBCONFIG_FULLJSON_DATA);
     if(ret != RBUS_ERROR_SUCCESS)
     {
-        CcspTraceError(("%s %d - Failed to Subscribe %s, Error=%s \n", __FUNCTION__, __LINE__, LEDMGR_WEBCONFIG_FULLJSON_DATA, rbusError_ToString(ret)));
+        CcspTraceError(("%s %d - Failed to unsubscribe %s, Error=%s \n", __FUNCTION__, __LINE__, LEDMGR_WEBCONFIG_FULLJSON_DATA, rbusError_ToString(ret)));
+    }
+#endif
+    ret = rbusEvent_Unsubscribe(rbusHandle, "Device.X_RDK_WanManager.InterfaceActiveStatus");
+    if(ret != RBUS_ERROR_SUCCESS)
+    {
+        CcspTraceError(("%s %d - Failed to unsubscribe %s, Error=%s \n", __FUNCTION__, __LINE__, "Device.X_RDK_WanManager.InterfaceActiveStatus", rbusError_ToString(ret)));
     }
     CcspTraceInfo(("LedMgr_UnSubscribeDML done\n"));
 }
@@ -718,6 +866,8 @@ ANSC_STATUS LedMgr_Rbus_Init()
         CcspTraceError(("LedMgr_Rbus_Init rbus initialization failed\n"));
         return rc;
     }
+
+#ifdef LEDMGR_WEBCONFIG
     // Register data elements
     rc = rbus_regDataElements(rbusHandle, NUM_OF_RBUS_PARAMS, ledMgrRbusDataElements);
     if (rc != RBUS_ERROR_SUCCESS)
@@ -733,15 +883,33 @@ ANSC_STATUS LedMgr_Rbus_Init()
         return ANSC_STATUS_FAILURE;
     }
     strncpy(g_LedMgr.data, "None", strlen("None")+1);
+#endif
+     rc = rbusEvent_Subscribe(rbusHandle,"Device.X_RDK_WanManager.InterfaceActiveStatus", WanInterfaceStatusHandler,NULL,0);
+
+    if(rc != RBUS_ERROR_SUCCESS)
+    {
+        AnscTraceError(("%s:%d:: Unable to subscribe for Device.X_RDK_WanManager.InterfaceActiveStatus\n", __FUNCTION__, __LINE__ ));
+        if(g_LedMgr.data)
+        {
+            free(g_LedMgr.data);
+            g_LedMgr.data = NULL;
+        }
+        rbus_close(rbusHandle);
+        return ANSC_STATUS_FAILURE;
+    }
+
     return ANSC_STATUS_SUCCESS;
+
 }
 /*******************************************************************************
-  LedMgr_RbusExit(): Unreg data elements and Exit
+  LedMgr_Rbus_Exit(): Unreg data elements and Exit
  ********************************************************************************/
-ANSC_STATUS LedMgr_RbusExit()
+ANSC_STATUS LedMgr_Rbus_Exit()
 {
     CcspTraceInfo(("%s %d - LedMgr_RbusExit called\n", __FUNCTION__, __LINE__ ));
+#ifdef LEDMGR_WEBCONFIG
     rbus_unregDataElements(rbusHandle, NUM_OF_RBUS_PARAMS, ledMgrRbusDataElements);
+#endif
     LedMgr_Rbus_UnSubscribeDML();
     rbus_close(rbusHandle);
     return ANSC_STATUS_SUCCESS;

@@ -191,7 +191,9 @@ ANSC_STATUS BackEndManagerInitialize(ANSC_HANDLE hThisObject)
     }
 #endif //RBUS_BUILD_FLAG_ENABLE
 
+#ifdef LEDMGR_WEBCONFIG
     LedMgrDmlLedWebConfigInit();
+#endif
 
     return returnStatus;
 }

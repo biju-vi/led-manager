@@ -39,6 +39,13 @@ typedef struct {
     CHAR* data;
 }LED_DATA;
 
+typedef enum
+{
+    IF_NONE_ACTIVE,
+    IF_PRIMARY_ACTIVE,
+    IF_BACKUP_ACTIVE
+} InterfaceStatusType;
+
 ANSC_STATUS LedMgr_Rbus_Init();
 ANSC_STATUS LedMgr_Rbus_Exit();
 ANSC_STATUS LedMgr_Rbus_String_EventPublish(char *dm_event, char *dm_value);
@@ -49,5 +56,4 @@ void LedMgr_Rbus_UnSubscribeDML(void);
 int LedMgr_parseOnOffJson (char* buffer_onOff);
 int LedMgr_parseBrightnessJson(char* buffer_brightness);
 int LedMgr_validateSchema(char* json_string, char* schema_path);
-
 #endif //_LEDMGR_RBUS_H_

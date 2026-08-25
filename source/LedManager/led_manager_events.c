@@ -37,7 +37,7 @@
 #ifdef WAN_STATUS_LED_EVENT
 #define LED_WAN_SYSEVENT_KEY  "rdkb_wan_status"
 #endif
-
+static pthread_mutex_t event_lock = PTHREAD_MUTEX_INITIALIZER;
 cpe_led_events_t led_events[] = 
 {
 {    ePowerOn,          "power_on"               },
@@ -59,6 +59,8 @@ cpe_led_events_t led_events[] =
 {    eDualStackUp,      "rdkb_dualstack"         },
 {    eMaptUp,           "rdkb_mapt"              },
 #endif
+{    eWanBackupActive,  "rdkb_wan_backup_active" },
+{    eWanPrimaryActive, "rdkb_wan_primary_active" },
 {    eFwUpdateStart,    "rdkb_fwupdate_start"    },
 {    eFwUpdateStop,     "rdkb_fwupdate_stop"     },
 {    eFwUpdateComplete, "rdkb_fwupdate_complete" },
@@ -103,15 +105,17 @@ cpe_event_t ledmgr_get_event_from_str (char * event_str);
 #ifdef WAN_STATUS_LED_EVENT
 cpe_event_t ledmgr_get_wan_event_from_str (char * event_str);
 #endif
-static int handle_event(cpe_event_t event)
+int handle_event(cpe_event_t event)
 {
 
+    pthread_mutex_lock(&event_lock);
     led_t * led_data_arr = g_led_data.led_obj_head;
     led_mode_t * mode_data_arr = g_mode_data.mode_obj_head;
 
     if ((mode_data_arr == NULL) || (led_data_arr == NULL))
     {
         CcspTraceError(("%s %d: invalid event or invalid config\n", __func__, __LINE__));
+        pthread_mutex_unlock(&event_lock);
         return FAILURE;
     }
 
@@ -164,9 +168,15 @@ static int handle_event(cpe_event_t event)
     }
 
     if (bupdate)
+    {
+        pthread_mutex_unlock(&event_lock);
         return SUCCESS;
+    }
     else
+    {
+        pthread_mutex_unlock(&event_lock);
         return FAILURE;
+    }
 }
 
 int ledmgr_catch_events()
